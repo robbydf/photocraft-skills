@@ -1,0 +1,18 @@
+# personal settings and secrets
+preferences.md
+config.env
+token.txt
+*.token
+# run state
+*-runs/
+runs/
+*.jsonl
+# renders and review output
+*.jpg
+*.jpeg
+*.png
+*.psd
+*.pcraft
+*.html
+__pycache__/
+*.pyc

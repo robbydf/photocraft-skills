@@ -1,0 +1,16 @@
+{
+  "name": "photocraft-skills",
+  "owner": {
+    "name": "robbydf"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for PhotoCraft, ArtCraft's pixel editor (Windows tested; macOS and Linux best effort)."
+  },
+  "plugins": [
+    {
+      "name": "photocraft",
+      "source": "./",
+      "description": "Drive PhotoCraft from Claude Code through its MCP bridge (Windows tested; macOS and Linux best effort)."
+    }
+  ]
+}
