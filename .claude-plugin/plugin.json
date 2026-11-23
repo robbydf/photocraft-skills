@@ -1,7 +1,7 @@
 {
   "name": "photocraft",
-  "version": "0.1.0",
-  "description": "Drive PhotoCraft (ArtCraft's pixel editor) from Claude Code: start the GUI with its token-protected control port and register the PhotoCraft MCP bridge.",
+  "version": "0.2.0",
+  "description": "Drive PhotoCraft (ArtCraft's pixel editor) from Claude Code: start the GUI with its token-protected control port, register the PhotoCraft MCP bridge, and remove bystanders from photos.",
   "author": { "name": "robbydf" },
   "repository": "https://github.com/robbydf/photocraft-skills",
   "license": "MIT",

@@ -8,8 +8,7 @@ photos, and PhotoCraft does the pixel work LightCraft can't.
 | Skill | What it does |
 |---|---|
 | `photocraft-mcp` | `start`: launch PhotoCraft with its control port, token file and automation folders, prove the bridge can drive it, and register the `photocraft` MCP server with Claude Code. `status`: show what's running and registered. `stop`: disconnect and close the control PhotoCraft gracefully. |
-
-Planned next: a skill that removes strangers and bystanders from photos handed over from LightCraft.
+| `photocraft-remove-bystander` | Remove a stranger or bystander from a photo, including a LightCraft `-Edit.psd` copy: select the person minus the subject, clone the background over them row by row, heal leftovers and seams, save in place and have LightCraft reload it. |
 
 ## Install
 
@@ -82,9 +81,11 @@ config and no log. Never commit the token file (`.gitignore` covers `token.txt` 
 .claude-plugin/plugin.json        plugin manifest
 .claude-plugin/marketplace.json   lets this repo be added as a marketplace
 skills/photocraft-mcp/SKILL.md
+skills/photocraft-remove-bystander/SKILL.md
 scripts/
   find_photocraft.py    install folder detection (Windows, macOS, Linux) and config.env reading
   photocraft-mcp.py     start / status / stop
+  pc-bridge.py          run a list of MCP tool calls through the bridge (when the MCP tools aren't loaded)
   pcargs.py             PowerShell-style options (-Port 7981, -ReadRoot DIR)
 tests/test_scripts.py
 ```

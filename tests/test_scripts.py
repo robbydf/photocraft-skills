@@ -450,5 +450,34 @@ class MacClose(unittest.TestCase):
         self.assertFalse(self.close(False, rc=1)[0])
 
 
+class PcBridge(unittest.TestCase):
+    def calls_file(self, text):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "calls.json")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+        return p
+
+    def test_load_calls(self):
+        load = importlib.import_module("pc-bridge").load_calls
+        p = self.calls_file('[["session_list"], ["doc_open", {"path": "a.psd"}]]')
+        self.assertEqual(load(p), [("session_list", {}), ("doc_open", {"path": "a.psd"})])
+        for bad in ('{"a": 1}', '[["x", 1]]', '[[1, {}]]', '[["x", {}, 3]]'):
+            with self.assertRaises(ValueError):
+                load(self.calls_file(bad))
+
+    def test_usage_and_token_exit_codes(self):
+        home = tempfile.mkdtemp()
+        env = {"PHOTOCRAFT_HOME": home, "PHOTOCRAFT_CONTROL_TOKEN_FILE": ""}
+        code, out = run("pc-bridge.py", self.calls_file('[["x", 1]]'), env=env)
+        self.assertEqual(code, 11, out)
+        good = self.calls_file('[["session_list"]]')
+        code, out = run("pc-bridge.py", good, env=env)
+        self.assertEqual(code, 10, out)
+        code, out = run("pc-bridge.py", good, "-TokenFile", "a" * 64, env=env)
+        self.assertEqual(code, 10, out)
+        self.assertNotIn("a" * 64, out)
+
+
 if __name__ == "__main__":
     unittest.main()
