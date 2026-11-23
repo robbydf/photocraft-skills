@@ -112,7 +112,13 @@ Tests (no PhotoCraft needed): `python -E -m unittest discover -s tests -v` from 
 - Closing a modified document opens an unsaved-changes dialog, answered with `control_call
   ui.dialog.confirm`.
 - Requests sent together in one bridge session can complete out of order.
-- The skill's "Using the tools" section has the details.
+- Round trip with LightCraft works when you drive the file yourself: LightCraft writes `<name>-Edit.psd`,
+  the control PhotoCraft (with that folder as its read and write root) opens it, edits it and saves it
+  under the same name, and LightCraft's `photo.reload` shows the edit. LightCraft's own send to
+  PhotoCraft fails once a photo has an `-Edit` copy ("the edit copy could not be added"), leaves a
+  duplicate `-Edit-2.psd` behind, and opens a regular PhotoCraft the bridge can't drive anyway.
+- PhotoCraft re-saves LightCraft's 144 MB uncompressed PSD as about 287 MB (RLE, with a layer block).
+- The skill's "Using the tools" and "Round trip with LightCraft" sections have the details.
 - A fresh start takes about 30 s before the bridge can drive the GUI.
 
 ## License

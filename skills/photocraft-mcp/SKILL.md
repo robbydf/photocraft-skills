@@ -1,6 +1,6 @@
 ---
 name: photocraft-mcp
-description: Use when the user asks to start/launch or stop/shut down PhotoCraft (ArtCraft's pixel editor GUI, not headless) together with the PhotoCraft CLI MCP bridge, to connect or disconnect Claude Code from the PhotoCraft MCP server, to grant PhotoCraft automation read/write folders, or runs /photocraft-mcp start, stop or status. Also when photocraft-cli mcp --bridge or mcp__photocraft__* tools fail because nothing is listening on 127.0.0.1:7981 or the control token is rejected.
+description: Use when the user asks to start/launch or stop/shut down PhotoCraft (ArtCraft's pixel editor GUI, not headless) together with the PhotoCraft CLI MCP bridge, to connect or disconnect Claude Code from the PhotoCraft MCP server, to grant PhotoCraft automation read/write folders, to edit a LightCraft photo's -Edit.psd copy in PhotoCraft and save it back, or runs /photocraft-mcp start, stop or status. Also when photocraft-cli mcp --bridge or mcp__photocraft__* tools fail because nothing is listening on 127.0.0.1:7981 or the control token is rejected.
 ---
 
 # photocraft-mcp
@@ -150,6 +150,40 @@ LightCraft `-Edit.psd`):
 
 **Order.** Requests sent together in one bridge session can finish out of order (a save ran before the
 `doc_new` it needed). Wait for each reply before sending a call that depends on it.
+
+## Round trip with LightCraft
+
+For pixel work on a LightCraft photo (removing a bystander, a patch), edit LightCraft's `-Edit.psd`
+copy in this control PhotoCraft and save it back. Don't use LightCraft's own send-to-PhotoCraft.
+Tested November 2026 with LightCraft and PhotoCraft 0.23.1 on a 24 MP raw:
+
+1. **LightCraft makes the copy.** `photo.editExternal format=psd` (or `photo.editInPhotoCraft`)
+   renders `<name>-Edit.psd` next to the original and adds it to the library, stacked on the original.
+   The file is flat, 16-bit and uncompressed (144 MB). If the photo already has a copy, reuse it.
+2. **Start PhotoCraft with that folder as both read and write root**:
+   `start -ReadRoot <photo folder> -WriteRoot <photo folder>`. A running PhotoCraft with other roots has
+   to be stopped and started again (ask first).
+3. **Back up the PSD** before you overwrite it (copy it to a scratch folder).
+4. **Edit and save in place.** `doc_open path=<name>-Edit.psd`, run the edit commands, then
+   `doc_save path=<name>-Edit.psd` (the same name) and `ui_menu_invoke id=file.close`. The file roughly
+   doubles in size (287 MB, RLE-compressed, with a layer block). Its merged image holds the edit, and
+   every other pixel stays identical.
+5. **LightCraft reloads the copy.** `photo.reload ids=[<copy id>] wait=true`. LightCraft shows the edit
+   with the copy's develop settings unchanged. Reload re-reads the file even when its modified time
+   went backwards (it did after a restore).
+
+What doesn't work:
+- **A second send to PhotoCraft fails** for a photo that already has an `-Edit` copy:
+  `photo.editInPhotoCraft` returns `invalid parameters for photo.editExternal: the edit copy could not be
+  added`, adds nothing to the library and never opens PhotoCraft. It still leaves a stray
+  `<name>-Edit-2.psd`, byte-identical to the existing copy. Delete it, after a `cmp`, once the user agrees.
+  This happens whether or not the control PhotoCraft is running.
+- **LightCraft's send opens a regular PhotoCraft**, not the `--control` one, so the bridge can't drive
+  the document it opened. Open the file yourself with `doc_open`.
+- Only a flat save was tested in LightCraft. A save with added layers kept a correct merged image when
+  read offline, but LightCraft's reload of a layered PSD hasn't been tried. Flatten
+  (`command_run id=layer.flattenImage`) before saving unless the user wants the layers.
+- If another session is driving LightCraft, agree with it before you `--connect` or reload.
 
 ## Common mistakes
 
