@@ -77,6 +77,7 @@ def main(argv):
         print("ERROR: PhotoCraft not found")
         return 9
     outdir = a.OutDir or os.path.dirname(os.path.abspath(a.calls))
+    os.makedirs(outdir, exist_ok=True)
     cli = os.path.join(pcdir, CLI_NAME)
     p = subprocess.Popen([cli, "mcp", "--bridge", "127.0.0.1:%d" % port, "--control-token-file", tok],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8")

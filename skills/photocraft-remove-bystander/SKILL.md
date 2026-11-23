@@ -7,7 +7,8 @@ description: Use when the user asks to remove a stranger, bystander, passer-by, 
 
 Remove a person from a photo in the control PhotoCraft, without touching the people who should stay,
 and save it back. Tested November 2026 on PhotoCraft 0.23.1 with a LightCraft `-Edit.psd` (6000x4000,
-16-bit, flat): a small, out-of-focus man standing behind the subject's arm, half hidden by her sleeve.
+16-bit, flat): a small, out-of-focus man standing behind the subject's arm, half hidden by her sleeve,
+and a woman on the other side standing right against the subject's jacket.
 
 ## 0. Set up
 
@@ -63,6 +64,13 @@ In bridge mode `render_preview` is a window screenshot too, so there is no full-
 `select.object` with a rectangle around a small, blurry figure caught only the torso (no head, no legs).
 Use the polygon.
 
+**When the person touches the subject, skip `select.subject`.** A woman standing right against the
+subject's sleeve was merged into the subject mask, so subtracting it removed most of her from the
+selection and left only a thin strip. Check the screenshot after step 3: if the ants cut through the
+bystander instead of going around them, `select.deselect` and draw the polygon by hand. On the side
+where the person touches the subject, run the polygon edge 2 px outside the subject's outline (trace it
+at 100 %, a point every 40–60 px, more at corners like a collar tip), and skip steps 3 and 2.1.
+
 ## 3. Fill: clone from the same rows, not Content-Aware Fill
 
 Paint on a new layer so a bad attempt is one `layer.delete` away: `layer.new.layer {"name":"Bystander
@@ -77,6 +85,14 @@ continues, so every row is copied from the same row: hedge from hedge, path from
 ```
 
 - Make the offset larger than the person's width, so no source pixel is part of the person.
+- **Lines in perspective** (a fence rail, a hedge top, a path edge) aren't horizontal. Tilt the
+  offset by their slope so they continue: rails rising 0.27 px per px to the right, cloned from 300 px
+  to the left, took `"offset":[-300,80]`.
+- A person in front of a depth change (far greenery behind the head, path under the feet) leaves a
+  patch of mid-distance texture with a dark top and bottom. Re-clone those bands from what lies
+  directly beyond them: the top band from above (`[0,-120]`), the bottom band from the path below
+  (`[0,70]`), each with the polygon intersected with a rect band (`select.rect … "mode":"intersect"`,
+  feather 20–30) and a soft brush (hardness 40).
 - Zig-zag the points across the selection's bounding box (every 50 px for a 110 px brush), with a
   margin of 20–40 px.
 - Where the copied rows don't fit (a light sky band above the head copied as dark trees), select that
@@ -121,6 +137,11 @@ Every step is in History. `edit.undo` or `layer.delete` reverses one.
 ## Common mistakes
 
 - `select.subject` with the wrong layer active (step 2.1).
+- `select.subject` subtract on a bystander who touches the subject: it treats them as part of the
+  subject (step 2).
+- `select.rect` takes `x`, `y`, `width`, `height` (not a `rect` array).
+- `layer.mergeDown` with a guessed layer id: ids aren't sequential, so use the id `layer.new.layer`
+  returned.
 - Converting screen to document coordinates with `pixelsPerPoint` (step 1).
 - A selection that stops above the feet.
 - Filling with Content-Aware Fill next to the subject (step 3).
