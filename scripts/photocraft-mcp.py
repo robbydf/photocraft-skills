@@ -1,9 +1,10 @@
 """photocraft-mcp: start / stop the PhotoCraft GUI with its control port + the CLI MCP bridge, and
-(dis)connect Claude Code.
+register Claude Code (user scope by default, so every session has the tools; `stop` leaves the
+registration and the sessions' bridges alone unless -Disconnect is given).
 
 Usage: python photocraft-mcp.py start|stop|status [-Port 7981] [-TokenFile FILE] [-ReadRoot DIR]...
-                                [-WriteRoot DIR] [-Scope local|user] [-TimeoutSec 60] [-Force]
-                                [-PhotoCraftDir DIR]
+                                [-WriteRoot DIR] [-Scope user|local] [-TimeoutSec 60] [-Force]
+                                [-Disconnect] [-PhotoCraftDir DIR]
 (python3 on macOS / Linux). Standard library only.
 
 The control port needs a token (64 hex digits) held in a file. The file comes from -TokenFile, else
@@ -19,7 +20,7 @@ Exit codes: 2 the port is held by something that can't prove the token (another 
 started with another token), 3 the port never opened, 4 the bridge initialize failed, 5 the bridge
 could not drive the GUI, 6 `claude mcp add` failed (or claude not found, or a project .mcp.json
 registers another command), 7 stop: the GUI is still open (or can't be asked to close gracefully),
-8 stop: the registration is still there, 9 PhotoCraft not found, 10 no usable token file, 11 a usage
+8 stop -Disconnect: the registration is still there, 9 PhotoCraft not found, 10 no usable token file, 11 a usage
 error (bad option or value, or a bad PHOTOCRAFT_PORT in config.env).
 """
 import argparse
@@ -421,8 +422,16 @@ def register(a, cli, addr, tok):
         return 6
     want = f"{cli} mcp --bridge {addr} --control-token-file {tok}"
     # `claude mcp get` shows one entry (local over project over user); walk down the scopes.
-    for _ in range(4):
+    for _ in range(5):
         reg = registration(claude)
+        if reg and reg[0] == "local" and a.Scope == "user":
+            # A local entry shadows the user one in this folder; drop it so every session sees the same.
+            say(f"claude: removing the local-scope '{NAME}' ('{scrub(reg[1] + ' ' + reg[2])}'), which would "
+                "shadow the user-scope one here")
+            if run([claude, "mcp", "remove", NAME, "-s", "local"]).returncode != 0:
+                say(f"ERROR: could not remove the local-scope '{NAME}' registration")
+                return 6
+            continue
         if matches(reg, cli, addr, tok):
             say(f"claude: MCP server '{NAME}' already registered ({reg[0]} scope)")
             return 0
@@ -562,10 +571,14 @@ def start(a, pcdir, cli, addr):
 
 def stop(a):
     problems = 0
-    # 1. Disconnect Claude Code from the local and user scopes (never a project's .mcp.json)
-    claude = claude_cmd()
+    # 1. Only with -Disconnect: unregister from the local and user scopes (never a project's .mcp.json).
+    #    Without it the registration stays: the bridge starts fine with PhotoCraft closed and answers
+    #    "cannot connect" until the next `start`.
+    claude = claude_cmd() if a.Disconnect else None
     removed = []
-    if claude:
+    if not a.Disconnect:
+        say(f"claude: MCP server '{NAME}' left registered (pass -Disconnect to remove it)")
+    elif claude:
         for s in ("local", "user"):
             if run([claude, "mcp", "remove", NAME, "-s", s]).returncode == 0:
                 removed.append(s)
@@ -573,18 +586,23 @@ def stop(a):
         say(f"claude: removed MCP server '{NAME}' from scope(s): {', '.join(removed)}")
     elif claude:
         say(f"claude: MCP server '{NAME}' was not registered")
-    else:
+    elif a.Disconnect:
         say("claude: the claude command is not on PATH; registration not checked")
     if claude and registration(claude):
         say(f"WARN: '{NAME}' still registered (claude mcp get {NAME})")
         problems += 1
 
-    # 2. Stop the bridge processes for this port (other ports' bridges belong to other setups)
-    bridges = bridge_pids(a.Port)
-    for b in bridges:
-        kill(b)
-    say(f"bridge: stopped {len(bridges)} photocraft-cli mcp process(es)" if bridges
-        else "bridge: no photocraft-cli mcp --bridge process running")
+    # 2. Only with -Disconnect: stop the bridge processes for this port (other ports' bridges belong to
+    #    other setups). Otherwise each Claude Code session keeps its bridge, which reconnects on its next
+    #    call once PhotoCraft runs again; killing it would cut that session's tools until /mcp.
+    if a.Disconnect:
+        bridges = bridge_pids(a.Port)
+        for b in bridges:
+            kill(b)
+        say(f"bridge: stopped {len(bridges)} photocraft-cli mcp process(es)" if bridges
+            else "bridge: no photocraft-cli mcp --bridge process running")
+    else:
+        say("bridge: left running (sessions reconnect on their next call; -Disconnect stops them)")
 
     # 3. Close the control GUI gracefully; a PhotoCraft without --control is the user's and stays open.
     pids = list(control_guis(a.Port))
@@ -670,12 +688,13 @@ def main(argv):
     ap.add_argument("-TokenFile", default="")
     ap.add_argument("-ReadRoot", action="append", default=[])
     ap.add_argument("-WriteRoot", default="")
-    ap.add_argument("-Scope", choices=["local", "user"], default="local", type=str.lower)
+    ap.add_argument("-Scope", choices=["local", "user"], default="user", type=str.lower)
     ap.add_argument("-TimeoutSec", type=int, default=60)
     ap.add_argument("-Force", action="store_true")
+    ap.add_argument("-Disconnect", action="store_true")
     ap.add_argument("-PhotoCraftDir", default="")
     a = ap.parse_args(fix_argv(argv, ["-Port", "-TokenFile", "-ReadRoot", "-WriteRoot", "-Scope", "-TimeoutSec",
-                                      "-PhotoCraftDir"], ["-Force"]))
+                                      "-PhotoCraftDir"], ["-Force", "-Disconnect"]))
     if a.Port is None:  # only now, so -Port and --help work even with a bad config line
         cfg_port = config_value("PHOTOCRAFT_PORT")
         if cfg_port and not (cfg_port.isdigit() and 0 < int(cfg_port) < 65536):

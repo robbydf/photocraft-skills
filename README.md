@@ -7,7 +7,7 @@ photos, and PhotoCraft does the pixel work LightCraft can't.
 
 | Skill | What it does |
 |---|---|
-| `photocraft-mcp` | `start`: launch PhotoCraft with its control port, token file and automation folders, prove the bridge can drive it, and register the `photocraft` MCP server with Claude Code. `status`: show what's running and registered. `stop`: disconnect and close the control PhotoCraft gracefully. |
+| `photocraft-mcp` | `start`: launch PhotoCraft with its control port, token file and automation folders, prove the bridge can drive it, and register the `photocraft` MCP server with Claude Code (user scope). `status`: show what's running and registered. `stop`: close the control PhotoCraft gracefully, leaving the registration in place (`-Disconnect` also unregisters). |
 | `photocraft-remove-bystander` | Remove a stranger or bystander from a photo, including a LightCraft `-Edit.psd` copy: select the person minus the subject, clone the background over them row by row, heal leftovers and seams, save in place and have LightCraft reload it. |
 
 ## Install
@@ -61,6 +61,13 @@ A ` # comment` after a value is ignored. Quote a value that itself contains ` #`
 registration passes the same path to the bridge, so the token is in no command line, no Claude Code
 config and no log. Never commit the token file (`.gitignore` covers `token.txt` and `*.token`).
 
+**Registration:** `start` registers `photocraft` at user scope, so every Claude Code session has the
+`mcp__photocraft__*` tools, and the registration stays in place when PhotoCraft is closed. With the app
+closed, a tool call fails with "cannot connect to 127.0.0.1:7981"; run `/photocraft-mcp start` in the
+same session and the existing tools work again, with no new session needed. The token file must exist when a
+session starts, because the bridge refuses to start without it. PhotoCraft creates it on its first
+`start`. `start -Scope local` registers only for the current folder; `stop -Disconnect` unregisters.
+
 **Automation roots** are fixed when PhotoCraft starts. To change them, `stop` and `start` again.
 
 **Install folder detection,** in this order (`scripts/find_photocraft.py`):
@@ -104,7 +111,9 @@ Tests (no PhotoCraft needed): `python -E -m unittest discover -s tests -v` from 
   graceful close is possible (on Linux without `wmctrl`, on macOS without Accessibility access when
   another PhotoCraft is open), `stop` sends nothing and exits 7. `-Force` kills it and is only for when
   you say so.
-- `stop` ends only the bridge processes for its own port.
+- A plain `stop` leaves the registration and the sessions' bridge processes alone. `stop -Disconnect`
+  removes the local and user registrations (never a project's `.mcp.json`) and ends only the bridge
+  processes for its own port.
 - `start` never kills anything. If the port is held by something that can't prove the token, it stops
   and says so.
 

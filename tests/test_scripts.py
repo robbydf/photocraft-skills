@@ -346,11 +346,34 @@ class Register(unittest.TestCase):
         self.assertEqual(rc, 6)
         self.assertNotIn("local", e)
 
+    def test_user_scope_is_the_default(self):
+        m = mcp()
+        seen = {}
+        with mock.patch.object(m, "stop", side_effect=lambda a: seen.setdefault("a", a) and 0):
+            m.main(["stop"])
+        self.assertEqual((seen["a"].Scope, seen["a"].Disconnect), ("user", False))
+        rc, e, cli, tok = self.go({}, scope="user")
+        self.assertEqual(rc, 0)
+        self.assertEqual(e, {"user": (cli, f"mcp --bridge 127.0.0.1:7981 --control-token-file {tok}")})
+        rc, e2, _, _ = self.go(e, scope="user")
+        self.assertEqual((rc, e2), (0, e))
+
+    def test_user_scope_removes_a_shadowing_local(self):
+        rc, e, cli, tok = self.go({}, scope="local")
+        # Even a matching local entry goes: it would shadow the user one in this folder.
+        rc, e2, _, _ = self.go(dict(e), scope="user")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("local", e2)
+        self.assertEqual(e2["user"], e["local"])
+        rc, e3, _, _ = self.go({"local": ("old-cli", "mcp --bridge 127.0.0.1:7999 --control-token-file x"),
+                                "user": e["local"]}, scope="user")
+        self.assertEqual((rc, e3), (0, {"user": e["local"]}))
+
 
 class Stop(unittest.TestCase):
     def test_no_graceful_close_is_not_a_kill(self):
         m = mcp()
-        a = SimpleNamespace(Port=7981, Force=False, TimeoutSec=1)
+        a = SimpleNamespace(Port=7981, Force=False, TimeoutSec=1, Disconnect=False)
         with mock.patch.object(m, "claude_cmd", return_value=None), \
                 mock.patch.object(m, "bridge_pids", return_value=[]), \
                 mock.patch.object(m, "control_guis", return_value={5: "photocraft --control 7981"}), \
@@ -361,6 +384,31 @@ class Stop(unittest.TestCase):
             self.assertEqual(m.stop(a), 7)
         kill.assert_not_called()
         self.assertEqual(close.call_args.kwargs, {"only_photocraft": False})  # pid 6 is another PhotoCraft
+
+    def _stop(self, disconnect):
+        m = mcp()
+        a = SimpleNamespace(Port=7981, Force=False, TimeoutSec=1, Disconnect=disconnect)
+        fake = FakeClaude({"user": ("cli", "mcp")})
+        with mock.patch.object(m, "claude_cmd", return_value="claude"), \
+                mock.patch.object(m, "run", side_effect=fake), \
+                mock.patch.object(m, "bridge_pids", return_value=[41, 42]), \
+                mock.patch.object(m, "control_guis", return_value={}), \
+                mock.patch.object(m, "gui_pids", return_value=[]), \
+                mock.patch.object(m, "kill") as kill, contextlib.redirect_stdout(io.StringIO()):
+            rc = m.stop(a)
+        return rc, fake.entries, kill
+
+    def test_plain_stop_keeps_registration_and_bridges(self):
+        rc, entries, kill = self._stop(False)
+        self.assertEqual(rc, 0)
+        self.assertIn("user", entries)
+        kill.assert_not_called()
+
+    def test_stop_disconnect_unregisters_and_ends_bridges(self):
+        rc, entries, kill = self._stop(True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(entries, {})
+        self.assertEqual(sorted(c.args[0] for c in kill.call_args_list), [41, 42])
 
     def test_linux_close_targets_only_the_pid(self):
         m = mcp()
