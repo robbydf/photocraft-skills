@@ -66,17 +66,27 @@ GUI starts. Relative paths resolve against them (`doc_save path=t.png` writes in
 3. Drives it through the bridge: an MCP `initialize`, then a `session_list` call. Only the app holding
    the same token answers that call, so this also proves the token.
 4. Prints the running instance's roots (`roots: read=[…] write=…`).
-5. Connects Claude Code if the server isn't registered yet:
-   `claude mcp add -s local photocraft -- "<cli>" mcp --bridge 127.0.0.1:7981 --control-token-file "<file>"`.
+5. Connects Claude Code if the server isn't registered yet, at **user scope** (every project, every
+   session): `claude mcp add -s user photocraft -- "<cli>" mcp --bridge 127.0.0.1:7981 --control-token-file "<file>"`.
+   An older local-scope `photocraft` entry would shadow it in that folder, so it is removed first.
    Claude Code spawns the bridge itself (stdio), so nothing is left running for it.
 
-Options: `-Scope user` (register for every project instead of only the current folder), `-Port`,
-`-TokenFile`, `-ReadRoot`, `-WriteRoot`, `-TimeoutSec` (default 60), `-PhotoCraftDir`.
+Options: `-Scope local` (register only for the current folder instead), `-Port`, `-TokenFile`,
+`-ReadRoot`, `-WriteRoot`, `-TimeoutSec` (default 60), `-PhotoCraftDir`.
 
-Success ends with `READY`. A fresh start takes about 30 s. The `mcp__photocraft__*` tools appear after
-Claude Code (re)connects. If they are missing in the current session, tell the user to start a new
-session (or run `/mcp`). Until then you can drive the same bridge from Bash by piping JSON-RPC lines
-into `photocraft-cli mcp --bridge 127.0.0.1:7981 --control-token-file <file>`.
+Success ends with `READY`. A fresh start takes about 30 s.
+
+**The registration is meant to stay.** Once registered, every Claude Code session has the
+`mcp__photocraft__*` tools, whether or not PhotoCraft is running: the bridge starts without the app and
+reconnects on each call. With PhotoCraft closed, a call returns an error like `cannot connect to
+127.0.0.1:7981 … start the app`. The fix is `/photocraft-mcp start` in the same session, not a new
+session. Only a session that started before the first registration lacks the tools; there, run `/mcp`
+or start a new session, or drive the bridge from Bash by piping JSON-RPC lines into
+`photocraft-cli mcp --bridge 127.0.0.1:7981 --control-token-file <file>`.
+
+**The token file must exist when a session starts,** even with PhotoCraft closed: the bridge refuses to
+start without it, and that session then has no PhotoCraft tools. PhotoCraft creates it on its first
+start, so run `start` once before relying on the registration, and don't delete the file.
 
 ## status
 
@@ -86,11 +96,15 @@ Code registration. Run it first when something fails.
 
 ## stop
 
-1. Disconnects Claude Code: `claude mcp remove photocraft` from the local and user scopes. A
-   project's own `.mcp.json` is left alone.
-2. Stops the `photocraft-cli mcp --bridge` processes for this port only. Bridges for other ports, and
-   ones whose command line can't be read, are left alone.
-3. Closes only the PhotoCraft started with `--control` on this port, so it can ask about unsaved
+A plain `stop` only closes the GUI. The registration and the sessions' bridges stay, so the tools come
+back with the next `start`. Each open session owns its own bridge process, and killing it would cut
+that session's tools until `/mcp`.
+
+1. Only with `-Disconnect`: `claude mcp remove photocraft` from the local and user scopes (a project's
+   own `.mcp.json` is left alone), and stop the `photocraft-cli mcp --bridge` processes for this port
+   (bridges for other ports, and ones whose command line can't be read, are left alone). Use it only
+   when the user wants Claude Code disconnected from PhotoCraft.
+2. Closes only the PhotoCraft started with `--control` on this port, so it can ask about unsaved
    documents. Other PhotoCraft windows stay open. A PhotoCraft whose command line can't be read counts
    only when the OS reports that very process owns the port, never by guessing. Waits up to `-TimeoutSec`.
    - Windows: a window close (WM_CLOSE).
@@ -113,7 +127,7 @@ only when the user says so. The macOS and Linux paths are untested.
 | 4 / 5 | start: the bridge initialize failed / the bridge couldn't drive the GUI | Show the error line; run `status`. |
 | 6 | start: `claude mcp add` failed, `claude` isn't on PATH, or a project `.mcp.json` registers `photocraft` differently | Show the error line. A local or user registration pointing elsewhere (another port, token file or install) is replaced automatically; a `.mcp.json` entry is the user's to change. |
 | 7 | stop: the GUI is still open (an unsaved-changes prompt?), or no graceful close could be sent (see the message) | Ask the user to answer the prompt or close PhotoCraft, or re-run `stop -Force` only on their yes. |
-| 8 | stop: the registration is still present | Usually a project's own `.mcp.json`. Run `claude mcp get photocraft` to see the scope. |
+| 8 | stop -Disconnect: the registration is still present | Usually a project's own `.mcp.json`. Run `claude mcp get photocraft` to see the scope. |
 | 9 | PhotoCraft not found | Ask for the install folder and save it as `PHOTOCRAFT_DIR=<folder>` in `~/.claude/photocraft/config.env`. |
 | 10 | no usable token file (missing folder, not a token, a token pasted as the path, or after `start` the file still doesn't exist) | Ask the user for the file and save it as `PHOTOCRAFT_TOKEN_FILE=<file>` in config.env. Never ask them to paste the token. |
 | 11 | usage error: a bad option or value, or a `PHOTOCRAFT_PORT` in config.env that isn't a port | Fix the command or the config line. |
