@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -17,6 +20,11 @@ jobs:
         include:
           - os: ubuntu-latest
             python: "3.10"
+          # The oldest Python the README promises (3.8); ubuntu-latest has no 3.8 build.
+          - os: windows-latest
+            python: "3.8"
+          - os: ubuntu-22.04
+            python: "3.8"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

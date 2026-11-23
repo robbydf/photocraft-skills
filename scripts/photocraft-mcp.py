@@ -18,8 +18,9 @@ PHOTOCRAFT_WRITE_ROOT=). Without them the bridge can drive the GUI but can't ope
 Exit codes: 2 the port is held by something that can't prove the token (another app, or a PhotoCraft
 started with another token), 3 the port never opened, 4 the bridge initialize failed, 5 the bridge
 could not drive the GUI, 6 `claude mcp add` failed (or claude not found, or a project .mcp.json
-registers another command), 7 stop: the GUI is still open, 8 stop: the registration is still there,
-9 PhotoCraft not found, 10 no usable token file.
+registers another command), 7 stop: the GUI is still open (or can't be asked to close gracefully),
+8 stop: the registration is still there, 9 PhotoCraft not found, 10 no usable token file, 11 a usage
+error (bad option or value, or a bad PHOTOCRAFT_PORT in config.env).
 """
 import argparse
 import csv
@@ -54,7 +55,7 @@ else:
 
 
 def say(s):
-    print(s, flush=True)
+    print(scrub(str(s)), flush=True)
 
 
 def run(args, timeout=60, **kw):
@@ -73,7 +74,7 @@ def text(b):
 
 def scrub(s):
     """Never echo a token, even inside an error message."""
-    return re.sub(r"\b[0-9a-fA-F]{64}\b", "<token>", s)
+    return re.sub(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])", "<token>", s)
 
 
 def listening(port):
@@ -90,11 +91,29 @@ def norm(p):
 
 # ---------------------------------------------------------------- processes
 
+PS_UTF8 = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+
+
+def _quote_args(args):
+    """Join argv like a Windows command line, quoting arguments with spaces, so flag_values reads them."""
+    return " ".join(f'"{x}"' if (" " in x or not x) else x for x in args)
+
+
+def _proc_cmdline(pid):
+    """Linux: the exact argv from /proc, re-quoted; None where /proc isn't available."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    return _quote_args([x.decode("utf-8", "replace") for x in raw.split(b"\0") if x])
+
+
 def processes(image):
     """[(pid, command line)] of processes with this executable name ('' command line if unknown)."""
     rows = []
     if WIN:
-        ps = ("Get-CimInstance Win32_Process -Filter \"Name='%s'\" | "
+        ps = (PS_UTF8 + "Get-CimInstance Win32_Process -Filter \"Name='%s'\" | "
               "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }" % image)
         r = run(["powershell", "-NoProfile", "-Command", ps])
         for line in text(r.stdout).splitlines():
@@ -106,13 +125,44 @@ def processes(image):
             rows = [(int(row[1]), "") for row in csv.reader(io.StringIO(text(r.stdout)))
                     if len(row) > 1 and row[0].lower() == image.lower() and row[1].isdigit()]
     else:
-        r = run(["ps", "-axo", "pid=,args="])
-        for line in text(r.stdout).splitlines():
+        # Match on the executable (comm), not the first word of args, which breaks on paths with spaces.
+        names = {}
+        for line in text(run(["ps", "-axo", "pid=,comm="]).stdout).splitlines():
+            pid, _, comm = line.strip().partition(" ")
+            if pid.isdigit():
+                names[int(pid)] = os.path.basename(comm.strip())
+        args = {}
+        for line in text(run(["ps", "-axo", "pid=,args="]).stdout).splitlines():
             pid, _, cmd = line.strip().partition(" ")
-            exe = cmd.split(" ", 1)[0]
-            if pid.isdigit() and os.path.basename(exe) == image:
-                rows.append((int(pid), cmd))
+            if pid.isdigit():
+                args[int(pid)] = cmd.strip()
+        for pid, comm in names.items():
+            if comm == image:
+                cmd = _proc_cmdline(pid)
+                rows.append((pid, cmd if cmd is not None else args.get(pid, "")))
     return rows
+
+
+def port_owner(port):
+    """PID listening on 127.0.0.1:<port>, or None if it can't be found."""
+    if WIN:
+        r = run(["powershell", "-NoProfile", "-Command",
+                 f"(Get-NetTCPConnection -LocalPort {int(port)} -State Listen -ErrorAction SilentlyContinue)"
+                 ".OwningProcess"], timeout=30)
+        pids = [int(x) for x in text(r.stdout).split() if x.isdigit()]
+        if not pids:  # no Get-NetTCPConnection. "LISTENING" is English-only: elsewhere this finds nothing,
+            # which is safe (no owner means no guess).
+            r = run(["netstat", "-ano", "-p", "TCP"], timeout=30)
+            for line in text(r.stdout).splitlines():
+                f = line.split()
+                if len(f) >= 5 and f[3].upper() == "LISTENING" and f[1].rsplit(":", 1)[-1] == str(port) \
+                        and f[4].isdigit():
+                    pids.append(int(f[4]))
+    else:
+        r = run(["lsof", "-nP", f"-iTCP:{int(port)}", "-sTCP:LISTEN", "-t"], timeout=30)
+        pids = [int(x) for x in text(r.stdout).split() if x.isdigit()]
+    pids = [p for p in pids if p > 0]
+    return pids[0] if pids else None
 
 
 def flag_values(cmd, flag):
@@ -127,25 +177,35 @@ def gui_pids():
 
 def control_guis(port):
     """{pid: command line} of PhotoCraft GUIs started with --control on this port.
-    A GUI whose command line is unknown, or that took the port from PHOTOCRAFT_CONTROL_PORT, counts
-    when the port is listening and it is the only GUI with no --control flag."""
-    out, unknown = {}, []
+    A GUI with no --control flag (its command line unreadable, or the port taken from
+    PHOTOCRAFT_CONTROL_PORT) counts only when the OS says that very process owns the listening port;
+    a guess could close the user's own PhotoCraft."""
+    out, rest = {}, []
     for name in GUI_NAMES:
         for pid, cmd in processes(name):
             ports = flag_values(cmd, "--control")
             if str(port) in ports:
                 out[pid] = cmd
             elif not ports:
-                unknown.append((pid, cmd))
-    if not out and len(unknown) == 1 and not unknown[0][1] and listening(port):
-        out[unknown[0][0]] = ""
+                rest.append((pid, cmd))
+    if not out and rest and listening(port):
+        owner = port_owner(port)
+        for pid, cmd in rest:
+            if pid == owner:
+                out[pid] = cmd
     return out
 
 
-def bridge_pids():
-    """photocraft-cli processes running `mcp --bridge` (Claude Code may still hold one after removal)."""
-    cli = CLI_NAME
-    return [p for p, c in processes(cli) if re.search(r"\bmcp\b", c) and "--bridge" in c]
+def bridge_pids(port):
+    """photocraft-cli `mcp --bridge` processes for this port (Claude Code may still hold one after
+    removal). Bridges for other ports, and ones whose command line can't be read, are left alone."""
+    out = []
+    for p, c in processes(CLI_NAME):
+        if not re.search(r"\bmcp\b", c):
+            continue
+        if any(v == str(port) or v.rsplit(":", 1)[-1] == str(port) for v in flag_values(c, "--bridge")):
+            out.append(p)
+    return out
 
 
 def kill(pid, force=True):
@@ -190,12 +250,27 @@ def restore_gui(pids):
                 say("gui: window was minimized; restored it")
                 time.sleep(0.5)
     elif MAC:
-        run(["osascript", "-e", 'tell application "System Events" to set visible of '
-             '(every process whose unix id is ' + str(min(pids)) + ') to true'], timeout=10)
+        for p in pids:
+            run(["osascript", "-e", 'tell application "System Events" to set visible of '
+                 '(every process whose unix id is ' + str(int(p)) + ') to true'], timeout=10)
 
 
-def close_gui(pids):
-    """Ask the GUI to close like a window close, so it can ask about unsaved documents."""
+def _linux_windows(pids):
+    """Linux (wmctrl): ids of the windows these processes own."""
+    if not shutil.which("wmctrl"):
+        return []
+    out = []
+    for line in text(run(["wmctrl", "-l", "-p"], timeout=10).stdout).splitlines():
+        f = line.split()
+        if len(f) >= 3 and f[2].isdigit() and int(f[2]) in pids:
+            out.append(f[0])
+    return out
+
+
+def close_gui(pids, only_photocraft):
+    """Ask the GUI to close like a window close, so it can ask about unsaved documents.
+    Returns False when no graceful close could be sent (then nothing was sent at all).
+    only_photocraft: no other PhotoCraft is running, so quitting the app by name is safe on macOS."""
     if WIN:
         import ctypes
         u, wins = _main_windows(set(pids))
@@ -206,9 +281,31 @@ def close_gui(pids):
             if pid.value not in seen:
                 seen.add(pid.value)
                 u.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE
-    else:
+        return bool(seen)
+    if MAC:
+        ok = True
         for p in pids:
-            kill(p, force=False)
+            proc = '(first process whose unix id is ' + str(int(p)) + ')'
+            if only_photocraft:  # the app's own Quit, which asks about unsaved documents
+                # Don't wait for the reply: with unsaved documents it comes only after the user answers.
+                script = ['-e', 'tell application "System Events" to set n to name of ' + proc,
+                          '-e', 'ignoring application responses', '-e', 'tell application n to quit',
+                          '-e', 'end ignoring']
+            else:
+                # Click this process's own Quit menu item: aimed at the process, not at keyboard focus, so
+                # it can't land on another app. Needs Accessibility access for the terminal. If the last
+                # item of the app menu isn't Quit (another layout or language), fail rather than guess.
+                script = ['-e', 'tell application "System Events" to tell ' + proc,
+                          '-e', 'set q to last menu item of menu 1 of menu bar item 2 of menu bar 1',
+                          '-e', 'if name of q does not start with "Quit" then error "no Quit item" number 1',
+                          '-e', 'ignoring application responses', '-e', 'click q', '-e', 'end ignoring',
+                          '-e', 'end tell']
+            ok = run(["osascript"] + script, timeout=15).returncode == 0 and ok
+        return ok
+    wins = _linux_windows(set(pids))
+    for w in wins:
+        run(["wmctrl", "-i", "-c", w], timeout=10)
+    return bool(wins)
 
 
 # ---------------------------------------------------------------- token and roots
@@ -224,6 +321,10 @@ def check_token_file(path):
                 "PHOTOCRAFT_TOKEN_FILE=<file> to ~/.claude/photocraft/config.env")
     if os.path.isdir(path):
         return f"token file {path} is a folder"
+    if TOKEN_RE.match(os.path.basename(path.strip().strip('"'))):
+        # Never use it as a file name: it would land in PhotoCraft's command line and Claude Code's config.
+        return ("the token file setting looks like a token itself, not a path to a file holding one; "
+                "give the file's path")
     if not os.path.exists(path):
         parent = os.path.dirname(os.path.abspath(path))
         return "" if os.path.isdir(parent) else f"token file folder {parent} does not exist"
@@ -243,7 +344,7 @@ def roots(a):
 
 # ---------------------------------------------------------------- bridge
 
-def bridge(cli, addr, tok):
+def bridge(cli, addr, tok, timeout=60):
     """Run the bridge for one initialize + one session_list call.
     Returns (stage, detail): ('ok', version), ('init', err), ('token', err) or ('call', err)."""
     lines = [
@@ -254,7 +355,7 @@ def bridge(cli, addr, tok):
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "session_list", "arguments": {}}},
     ]
     stdin = "".join(json.dumps(x) + "\n" for x in lines).encode()
-    r = run([cli, "mcp", "--bridge", addr, "--control-token-file", tok], timeout=60, input=stdin)
+    r = run([cli, "mcp", "--bridge", addr, "--control-token-file", tok], timeout=timeout, input=stdin)
     replies = {}
     for ln in text(r.stdout).splitlines():
         try:
@@ -265,12 +366,12 @@ def bridge(cli, addr, tok):
             replies[d["id"]] = d
     err = scrub((text(r.stderr).strip().splitlines() or [""])[-1])
     init = replies.get(1, {})
-    if "result" not in init:
+    if not isinstance(init.get("result"), dict):
         return "init", scrub(json.dumps(init.get("error"))) if init else (err or f"exit {r.returncode}")
-    version = init["result"].get("serverInfo", {}).get("version", "?")
+    version = (init["result"].get("serverInfo") or {}).get("version", "?")
     call = replies.get(2, {})
-    res = call.get("result") or {}
-    body = "".join(c.get("text", "") for c in res.get("content", []) if isinstance(c, dict))
+    res = call.get("result") if isinstance(call.get("result"), dict) else {}
+    body = "".join(c.get("text", "") for c in (res.get("content") or []) if isinstance(c, dict))
     if not call or "error" in call or res.get("isError"):
         detail = scrub(body or json.dumps(call.get("error")) if call else (err or "no reply"))
         return ("token" if TOKEN_MISMATCH in detail else "call"), detail[:300]
@@ -359,8 +460,16 @@ def report_roots(cmd, want_read, want_write):
     have_r = [os.path.abspath(r) for r in flag_values(cmd, "--automation-read-root")]
     have_w = [os.path.abspath(w) for w in flag_values(cmd, "--automation-write-root")]
     say(f"roots: read={have_r or 'none'} write={have_w[-1] if have_w else 'none'}")
-    missing = [r for r in want_read if norm(r) not in map(norm, have_r)]
-    if want_write and norm(want_write) not in map(norm, have_w):
+
+    def granted(flag, want, have):
+        if not MAC:
+            return norm(want) in map(norm, have)
+        # macOS `ps` drops the quotes around a path with spaces, so flag_values may cut "/a b" to "/a".
+        # Look for the path itself, followed by the next flag or the end of the line.
+        return any(re.search(re.escape(flag) + r"[ =]" + re.escape(w) + r"(?= --|$)", cmd)
+                   for w in {want, want.rstrip("/")})
+    missing = [r for r in want_read if not granted("--automation-read-root", r, have_r)]
+    if want_write and not granted("--automation-write-root", want_write, have_w):
         missing.append(f"write {want_write}")
     if missing:
         say(f"WARN: the running PhotoCraft lacks root(s) {missing}; roots are set at launch, so 'stop' "
@@ -396,25 +505,37 @@ def start(a, pcdir, cli, addr):
         else:
             kw["start_new_session"] = True
         env = {k: v for k, v in os.environ.items() if not k.startswith("PHOTOCRAFT_CONTROL_")}
-        subprocess.Popen(args, env=env, **kw)
-        deadline = time.time() + a.TimeoutSec
+        try:
+            subprocess.Popen(args, env=env, **kw)
+        except OSError as e:
+            say(f"ERROR: could not start {gui}: {e}")
+            return 3
+        deadline = time.monotonic() + a.TimeoutSec
         while not listening(a.Port):
-            if time.time() > deadline:
+            if time.monotonic() > deadline:
                 say(f"ERROR: PhotoCraft did not open {addr} within {a.TimeoutSec} s (see {LOG_HINT})")
                 return 3
             time.sleep(0.5)
         say(f"gui: started, control port listening on {addr}")
         started = True
-    if check_token_file(tok):
-        say(f"ERROR: {check_token_file(tok)}")
+    # The file must now exist and hold a token (PhotoCraft writes it on a fresh start).
+    wait_until = time.monotonic() + (5 if started else 0)
+    while not os.path.isfile(tok) and time.monotonic() < wait_until:
+        time.sleep(0.5)
+    problem = check_token_file(tok) or ("" if os.path.isfile(tok) else
+                                        f"token file {tok} does not exist, so the PhotoCraft on {addr} "
+                                        "was not started with it")
+    if problem:
+        say(f"ERROR: {problem}")
         return 10
 
     # 2. Bridge: initialize, then one real call that the app answers only for the right token.
     stage, detail = "call", ""
-    deadline = time.time() + (a.TimeoutSec if started else 0)
+    deadline = time.monotonic() + (a.TimeoutSec if started else 0)
     while True:
-        stage, detail = bridge(cli, addr, tok)
-        if stage in ("ok", "token", "init") or time.time() > deadline:
+        remaining = deadline - time.monotonic()
+        stage, detail = bridge(cli, addr, tok, timeout=max(10, min(60, remaining)))
+        if stage in ("ok", "token", "init") or time.monotonic() > deadline:
             break
         time.sleep(1)  # a fresh GUI may open the port before it can answer
     if stage == "init":
@@ -458,8 +579,8 @@ def stop(a):
         say(f"WARN: '{NAME}' still registered (claude mcp get {NAME})")
         problems += 1
 
-    # 2. Stop bridge processes
-    bridges = bridge_pids()
+    # 2. Stop the bridge processes for this port (other ports' bridges belong to other setups)
+    bridges = bridge_pids(a.Port)
     for b in bridges:
         kill(b)
     say(f"bridge: stopped {len(bridges)} photocraft-cli mcp process(es)" if bridges
@@ -475,9 +596,24 @@ def stop(a):
         say(f"gui: no PhotoCraft serving port {a.Port}")
     else:
         restore_gui(pids)
-        close_gui(pids)
-        deadline = time.time() + a.TimeoutSec
-        while any(p in gui_pids() for p in pids) and time.time() < deadline:
+        if not close_gui(pids, only_photocraft=not others):
+            if WIN:
+                how = "it has no visible window"
+            elif MAC:
+                how = "allow Accessibility access for this terminal"
+            elif not shutil.which("wmctrl"):
+                how = "install wmctrl"
+            else:
+                how = "wmctrl found no window for it (Wayland?)"
+            if not a.Force:
+                say(f"ERROR: could not ask PhotoCraft (pid {','.join(map(str, pids))}) to close like a window "
+                    f"close ({how}). Close it yourself, or re-run 'stop -Force' (unsaved work is lost).")
+                return 7
+            say(f"gui: no graceful close possible ({how}); -Force given, so killing it")
+            for p in pids:
+                kill(p)
+        deadline = time.monotonic() + a.TimeoutSec
+        while any(p in gui_pids() for p in pids) and time.monotonic() < deadline:
             time.sleep(0.5)
         left = [p for p in pids if p in gui_pids()]
         if not left:
@@ -501,8 +637,11 @@ def status(a, cli, addr):
     say(f"cli: {cli}")
     say(f"token file: {tok or 'not configured'}" + (f" ({check_token_file(tok)})" if check_token_file(tok) else ""))
     guis = control_guis(a.Port)
-    say(f"gui: {'listening on ' + addr if listening(a.Port) else 'port ' + addr + ' closed'}; "
-        f"control pid(s) {','.join(map(str, guis)) or 'none'}")
+    up = listening(a.Port)
+    owner = port_owner(a.Port) if up else None
+    say(f"gui: {'listening on ' + addr if up else 'port ' + addr + ' closed'}"
+        + (f" (owned by pid {owner})" if owner else "")
+        + f"; PhotoCraft started with --control {a.Port}: pid(s) {','.join(map(str, guis)) or 'none'}")
     if guis:
         report_roots(next(iter(guis.values())), *roots(a))
     claude = claude_cmd()
@@ -512,11 +651,22 @@ def status(a, cli, addr):
     return 0
 
 
+USAGE_EXIT = 11
+
+
+class Parser(argparse.ArgumentParser):
+    """argparse exits 2 on a usage error, which here means 'port held by something else'."""
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        sys.exit(USAGE_EXIT)
+
+
 def main(argv):
-    ap = argparse.ArgumentParser(prog="photocraft-mcp.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = Parser(prog="photocraft-mcp.py", description=__doc__,
+                formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("action", choices=["start", "stop", "status"], type=str.lower)
-    ap.add_argument("-Port", type=int, default=int(config_value("PHOTOCRAFT_PORT") or 7981))
+    ap.add_argument("-Port", type=int, default=None)
     ap.add_argument("-TokenFile", default="")
     ap.add_argument("-ReadRoot", action="append", default=[])
     ap.add_argument("-WriteRoot", default="")
@@ -526,10 +676,18 @@ def main(argv):
     ap.add_argument("-PhotoCraftDir", default="")
     a = ap.parse_args(fix_argv(argv, ["-Port", "-TokenFile", "-ReadRoot", "-WriteRoot", "-Scope", "-TimeoutSec",
                                       "-PhotoCraftDir"], ["-Force"]))
+    if a.Port is None:  # only now, so -Port and --help work even with a bad config line
+        cfg_port = config_value("PHOTOCRAFT_PORT")
+        if cfg_port and not (cfg_port.isdigit() and 0 < int(cfg_port) < 65536):
+            say(f"ERROR: PHOTOCRAFT_PORT={cfg_port!r} in ~/.claude/photocraft/config.env is not a port number")
+            return USAGE_EXIT
+        a.Port = int(cfg_port or 7981)
+    if not 0 < a.Port < 65536:
+        ap.error(f"-Port {a.Port} is not a port number")
     addr = f"127.0.0.1:{a.Port}"
     if a.action == "stop":
         return stop(a)
-    pcdir = a.PhotoCraftDir or find()
+    pcdir = find(a.PhotoCraftDir)
     cli = os.path.join(pcdir, CLI_NAME) if pcdir else ""
     if not cli or not os.path.isfile(cli):
         say("ERROR: PhotoCraft not found. Pass -PhotoCraftDir or set PHOTOCRAFT_DIR (env or "

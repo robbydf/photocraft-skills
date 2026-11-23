@@ -56,6 +56,8 @@ PHOTOCRAFT_READ_ROOT=E:/Photos
 PHOTOCRAFT_WRITE_ROOT=E:/Photos/PhotoCraft
 ```
 
+A ` # comment` after a value is ignored. Quote a value that itself contains ` #`.
+
 **Token:** the token never leaves its file. The GUI gets `--control-token-file <file>`, and Claude Code's
 registration passes the same path to the bridge, so the token is in no command line, no Claude Code
 config and no log. Never commit the token file (`.gitignore` covers `token.txt` and `*.token`).
@@ -63,7 +65,8 @@ config and no log. Never commit the token file (`.gitignore` covers `token.txt` 
 **Automation roots** are fixed when PhotoCraft starts. To change them, `stop` and `start` again.
 
 **Install folder detection,** in this order (`scripts/find_photocraft.py`):
-1. `--dir` to `find_photocraft.py`, `-PhotoCraftDir` to `photocraft-mcp.py`;
+1. `--dir` to `find_photocraft.py`, `-PhotoCraftDir` to `photocraft-mcp.py`: if given, it is the only
+   folder searched (itself and two levels below, so an ArtCraft suite folder or `PhotoCraft.app` works);
 2. the `PHOTOCRAFT_DIR` environment variable;
 3. `PHOTOCRAFT_DIR` in `config.env`;
 4. per system: Windows, the uninstall entries in the registry, then `ArtCraft\PhotoCraft` or
@@ -91,10 +94,16 @@ Tests (no PhotoCraft needed): `python -E -m unittest discover -s tests -v` from 
 
 ## Safety
 
-- The token is never printed: the scripts replace any 64-hex string in their output with `<token>`.
+- The token is never printed: the scripts replace any 64-hex string in their output with `<token>`. A
+  token pasted where the token file's path belongs is refused, so it never reaches a command line or
+  Claude Code's config.
 - `stop` closes only the PhotoCraft started with `--control` on the port, with a normal window close, so
-  PhotoCraft can ask about unsaved documents. A PhotoCraft you opened yourself stays open. `-Force`
-  kills it and is only for when you say so.
+  PhotoCraft can ask about unsaved documents. A PhotoCraft you opened yourself stays open. When a
+  process's command line can't be read, it is closed only if the OS reports it owns the port. If no
+  graceful close is possible (on Linux without `wmctrl`, on macOS without Accessibility access when
+  another PhotoCraft is open), `stop` sends nothing and exits 7. `-Force` kills it and is only for when
+  you say so.
+- `stop` ends only the bridge processes for its own port.
 - `start` never kills anything. If the port is held by something that can't prove the token, it stops
   and says so.
 
