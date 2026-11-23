@@ -19,7 +19,8 @@ python "<base>/../../scripts/photocraft-mcp.py" status
 python "<base>/../../scripts/photocraft-mcp.py" stop
 ```
 
-- **Install folder:** found by `find_photocraft.py`: `-PhotoCraftDir`, the `PHOTOCRAFT_DIR` environment
+- **Install folder:** found by `find_photocraft.py`: `-PhotoCraftDir` (if given, the only folder
+  searched, itself and two levels below, so an ArtCraft suite folder or `PhotoCraft.app` works), the `PHOTOCRAFT_DIR` environment
   variable, `PHOTOCRAFT_DIR=` in `~/.claude/photocraft/config.env`, then per system: the registry and
   `Program Files\ArtCraft\PhotoCraft` (Windows), `/Applications/PhotoCraft.app/Contents/MacOS` (macOS),
   `/opt/photocraft` and similar (Linux), and last `photocraft-cli` on `PATH`. That folder holds the GUI
@@ -33,7 +34,8 @@ python "<base>/../../scripts/photocraft-mcp.py" stop
 PhotoCraft's control port requires a 64-hex-digit token, and the bridge refuses to start without one.
 - The script uses a token **file**: `-TokenFile`, else `$PHOTOCRAFT_CONTROL_TOKEN_FILE`, else
   `PHOTOCRAFT_TOKEN_FILE=` in `~/.claude/photocraft/config.env`. If none is set, ask the user for the
-  file and save it there. If the file doesn't exist yet, PhotoCraft creates it on start.
+  file and save it there. If the file doesn't exist yet, PhotoCraft creates it on start. A value
+  that is itself 64 hex digits (the token pasted instead of a path) is refused with exit 10.
 - The GUI starts with `--control-token-file <file>`, and Claude Code's registration passes the same
   path (`--control-token-file`), so the token itself is never in a command line or a config.
 - **Never print, echo or `cat` the token**, and never put it in a commit, a log, or a message. To check
@@ -74,23 +76,33 @@ Options: `-Scope user` (register for every project instead of only the current f
 Success ends with `READY`. A fresh start takes about 30 s. The `mcp__photocraft__*` tools appear after
 Claude Code (re)connects. If they are missing in the current session, tell the user to start a new
 session (or run `/mcp`). Until then you can drive the same bridge from Bash by piping JSON-RPC lines
-into `photocraft-cli mcp --bridge 7981 --control-token-file <file>`.
+into `photocraft-cli mcp --bridge 127.0.0.1:7981 --control-token-file <file>`.
 
 ## status
 
-Read-only: the CLI path, whether the token file is usable, whether the port listens and which PhotoCraft
-pid holds it, its roots, and the Claude Code registration. Run it first when something fails.
+Read-only: the CLI path, whether the token file is usable, whether the port listens and which pid owns
+it (from the OS), the pids of PhotoCraft started with `--control <port>`, their roots, and the Claude
+Code registration. Run it first when something fails.
 
 ## stop
 
 1. Disconnects Claude Code: `claude mcp remove photocraft` from the local and user scopes. A
    project's own `.mcp.json` is left alone.
-2. Stops any running `photocraft-cli mcp --bridge` processes.
-3. Closes only the PhotoCraft started with `--control` on this port, with a window close, so it can
-   ask about unsaved documents. Other PhotoCraft windows stay open. Waits up to `-TimeoutSec`.
+2. Stops the `photocraft-cli mcp --bridge` processes for this port only. Bridges for other ports, and
+   ones whose command line can't be read, are left alone.
+3. Closes only the PhotoCraft started with `--control` on this port, so it can ask about unsaved
+   documents. Other PhotoCraft windows stay open. A PhotoCraft whose command line can't be read counts
+   only when the OS reports that very process owns the port, never by guessing. Waits up to `-TimeoutSec`.
+   - Windows: a window close (WM_CLOSE).
+   - macOS: the app's Quit through `osascript` when it's the only PhotoCraft running. Otherwise a click on
+     that process's own Quit menu item (never a keystroke, which could reach another app). This needs
+     Accessibility access for the terminal, and fails if the app menu's last item isn't named Quit.
+   - Linux: a window close through `wmctrl`, for that process's windows.
+   - If no graceful close can be sent (no wmctrl, no Accessibility access, no visible window), nothing
+     is sent and `stop` exits 7.
 
 Success ends with `STOPPED`. `-Force` kills PhotoCraft if it won't close, losing unsaved work; use it
-only when the user says so.
+only when the user says so. The macOS and Linux paths are untested.
 
 ## Exit codes
 
@@ -100,10 +112,12 @@ only when the user says so.
 | 3 | start: the control port never opened | Check `%APPDATA%\PhotoCraft\logs\photocraft.log` (`~/Library/Application Support/PhotoCraft/logs/` on macOS, `~/.local/share/PhotoCraft/logs/` on Linux). |
 | 4 / 5 | start: the bridge initialize failed / the bridge couldn't drive the GUI | Show the error line; run `status`. |
 | 6 | start: `claude mcp add` failed, `claude` isn't on PATH, or a project `.mcp.json` registers `photocraft` differently | Show the error line. A local or user registration pointing elsewhere (another port, token file or install) is replaced automatically; a `.mcp.json` entry is the user's to change. |
-| 7 | stop: the GUI is still open (an unsaved-changes prompt?) | Ask the user to answer it, or re-run `stop -Force` only on their yes. |
+| 7 | stop: the GUI is still open (an unsaved-changes prompt?), or no graceful close could be sent (see the message) | Ask the user to answer the prompt or close PhotoCraft, or re-run `stop -Force` only on their yes. |
 | 8 | stop: the registration is still present | Usually a project's own `.mcp.json`. Run `claude mcp get photocraft` to see the scope. |
 | 9 | PhotoCraft not found | Ask for the install folder and save it as `PHOTOCRAFT_DIR=<folder>` in `~/.claude/photocraft/config.env`. |
-| 10 | no usable token file | Ask the user for the file and save it as `PHOTOCRAFT_TOKEN_FILE=<file>` in config.env. |
+| 10 | no usable token file (missing folder, not a token, a token pasted as the path, or after `start` the file still doesn't exist) | Ask the user for the file and save it as `PHOTOCRAFT_TOKEN_FILE=<file>` in config.env. Never ask them to paste the token. |
+| 11 | usage error: a bad option or value, or a `PHOTOCRAFT_PORT` in config.env that isn't a port | Fix the command or the config line. |
+| 1 | an unexpected Python error (traceback) | Show it, scrubbed of any token, and run `status`. |
 
 ## Using the tools (PhotoCraft 0.23.1, bridge mode)
 

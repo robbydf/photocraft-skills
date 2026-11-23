@@ -1,6 +1,6 @@
 """Print the folder that holds PhotoCraft's CLI (photocraft-cli.exe on Windows, photocraft-cli elsewhere).
 
-Order: --dir argument, $PHOTOCRAFT_DIR, PHOTOCRAFT_DIR in <PHOTOCRAFT_HOME>/config.env, then per system:
+Order: --dir argument (if given, the only folder searched, up to two levels deep), $PHOTOCRAFT_DIR, PHOTOCRAFT_DIR in <PHOTOCRAFT_HOME>/config.env, then per system:
   Windows: the uninstall entries in the registry, then Program Files / Program Files (x86) /
            %LOCALAPPDATA%\\Programs (ArtCraft\\PhotoCraft or PhotoCraft)
   macOS:   /Applications and ~/Applications: PhotoCraft.app, ArtCraft/PhotoCraft.app (Contents/MacOS)
@@ -33,16 +33,20 @@ def pc_home():
 
 
 def config_values(key):
-    """Every value of KEY=value in <PHOTOCRAFT_HOME>/config.env, in file order (quotes stripped)."""
+    """Every value of KEY=value in <PHOTOCRAFT_HOME>/config.env, in file order (quotes stripped).
+    A ` # comment` after an unquoted value is dropped."""
     cfg = os.path.join(pc_home(), "config.env")
     out = []
-    pat = re.compile(r'^\s*' + re.escape(key) + r'\s*=\s*"?([^"]*?)"?\s*$')
+    # A value with only an opening quote (KEY="D:/t.txt) still counts, as it always did.
+    pat = re.compile(r'^\s*' + re.escape(key) + r'\s*=\s*(?:"([^"]*)"|"?([^"]*?))\s*(?:\s#.*)?$')
     try:
         with open(cfg, encoding="utf-8-sig") as fh:
             for line in fh:
-                m = pat.match(line)
-                if m and m.group(1):
-                    out.append(m.group(1))
+                m = pat.match(line.rstrip("\r\n"))
+                if m:
+                    v = m.group(1) if m.group(1) is not None else m.group(2)
+                    if v:
+                        out.append(v)
     except OSError:
         pass
     return out
@@ -131,19 +135,30 @@ def candidates(arg):
     return [x for x in c if x]
 
 
+def search(c, deep=False):
+    """The folder holding the CLI: c itself, or up to two levels below it. The deeper search runs only
+    inside a PhotoCraft folder (never a drive root or Program Files), or anywhere when deep=True (a
+    folder the user named, such as an ArtCraft suite folder or PhotoCraft.app)."""
+    if has_cli(c):
+        return os.path.abspath(c)
+    if os.path.isdir(c) and (deep or re.search("PhotoCraft", os.path.basename(os.path.normpath(c)), re.I)):
+        base = os.path.normpath(c).count(os.sep)
+        for root, dirs, fs in os.walk(c):
+            if CLI_NAME in fs:
+                return os.path.abspath(root)
+            if root.count(os.sep) - base >= 2:
+                dirs[:] = []
+    return ""
+
+
 def find(arg=""):
-    for c in candidates(arg):
-        if has_cli(c):
-            return os.path.abspath(c)
-        # Search two levels deeper only inside a PhotoCraft folder, never a drive root or Program Files.
-        # (Not an ArtCraft folder: that also holds LightCraft, whose CLI has another name anyway.)
-        if os.path.isdir(c) and re.search("PhotoCraft", os.path.basename(os.path.normpath(c)), re.I):
-            base = os.path.normpath(c).count(os.sep)
-            for root, dirs, fs in os.walk(c):
-                if CLI_NAME in fs:
-                    return os.path.abspath(root)
-                if root.count(os.sep) - base >= 2:
-                    dirs[:] = []
+    """An explicit folder (arg) is the only place searched; otherwise the usual order."""
+    if arg:
+        return search(arg, deep=True)
+    for c in candidates(""):
+        d = search(c)
+        if d:
+            return d
     return ""
 
 
