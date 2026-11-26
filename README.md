@@ -17,8 +17,7 @@ photos, and PhotoCraft does the pixel work LightCraft can't.
 /plugin install photocraft@robbydf-plugins
 ```
 
-`robbydf/claude-plugins` is the one marketplace for all of my plugins. This repo's own marketplace
-(`/plugin marketplace add robbydf/photocraft-skills`) still works too.
+`robbydf/claude-plugins` is the one marketplace for all of my plugins.
 
 Then, in Claude Code, run `/photocraft:mcp start` (plugin skills are namespaced), or just ask
 Claude to start PhotoCraft. Set the token file first (see Configuration).
@@ -83,7 +82,6 @@ session starts, because the bridge refuses to start without it. PhotoCraft creat
 
 ```
 .claude-plugin/plugin.json        plugin manifest
-.claude-plugin/marketplace.json   lets this repo be added as a marketplace
 skills/mcp/SKILL.md
 skills/remove-bystander/SKILL.md
 scripts/
