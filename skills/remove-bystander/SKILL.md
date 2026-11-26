@@ -1,9 +1,9 @@
 ---
-name: photocraft-remove-bystander
-description: Use when the user asks to remove a stranger, bystander, passer-by, tourist or other unwanted person from a photo with PhotoCraft (ArtCraft's pixel editor), including a LightCraft photo handed over as its -Edit.psd copy, e.g. "remove the person on the right", "get rid of the guy behind her", "erase the stranger near Sarah's arm", or runs /photocraft-remove-bystander.
+name: remove-bystander
+description: Use when the user asks to remove a stranger, bystander, passer-by, tourist or other unwanted person from a photo with PhotoCraft (ArtCraft's pixel editor), including a LightCraft photo handed over as its -Edit.psd copy, e.g. "remove the person on the right", "get rid of the guy behind her", "erase the stranger near Sarah's arm", or runs /photocraft:remove-bystander.
 ---
 
-# photocraft-remove-bystander
+# photocraft:remove-bystander
 
 Remove a person from a photo in the control PhotoCraft, without touching the people who should stay,
 and save it back. Tested November 2026 on PhotoCraft 0.23.1 with a LightCraft `-Edit.psd` (6000x4000,
@@ -15,10 +15,10 @@ and a woman on the other side standing right against the subject's jacket.
 - **Which file, which person.** Get the path and where the bystander is ("right side, near Sarah's left
   arm"). For a LightCraft photo, the copy is `<name>-Edit.psd` next to the original, with its LightCraft
   id. Don't send the photo from LightCraft again if it already has a copy (it fails and leaves an
-  `-Edit-2.psd`), see `photocraft-mcp` → Round trip with LightCraft.
+  `-Edit-2.psd`), see `photocraft:mcp` → Round trip with LightCraft.
 - **Back up the file** before anything else (copy it to the scratch folder and compare hashes).
 - **Start the control PhotoCraft with the photo's folder as both read and write root**, using the
-  `photocraft-mcp` skill: `start -ReadRoot <folder> -WriteRoot <folder>`. A running one with other roots
+  `photocraft:mcp` skill: `start -ReadRoot <folder> -WriteRoot <folder>`. A running one with other roots
   has to be stopped first, which closes its window. Ask before you do that.
 - **Driving it.** Use the `mcp__photocraft__*` tools when they are loaded. When they aren't (the server
   was registered after the session started), use the plugin's driver, which runs one tool call after
@@ -126,7 +126,7 @@ Every step is in History. `edit.undo` or `layer.delete` reverses one.
 1. Flat is what LightCraft has been tested with: after `layer.mergeDown` there is one layer; otherwise
    `layer.flattenImage`.
 2. `doc_save path=<name>-Edit.psd` (the same name, in place) and `ui_menu_invoke id=file.close`. The 144
-   MB file became 290 MB (RLE plus a layer block), as `photocraft-mcp` describes.
+   MB file became 290 MB (RLE plus a layer block), as `photocraft:mcp` describes.
 3. LightCraft reloads the copy: `photo.reload ids=[<copy id>] wait=true`, run from the LightCraft
    session, or with
    `"<LightCraft dir>/lightcraft-cli.exe" run --connect 127.0.0.1:7980 photo.reload ids=[<id>] wait=true`
