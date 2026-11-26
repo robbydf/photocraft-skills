@@ -7,8 +7,8 @@ photos, and PhotoCraft does the pixel work LightCraft can't.
 
 | Skill | What it does |
 |---|---|
-| `photocraft-mcp` | `start`: launch PhotoCraft with its control port, token file and automation folders, prove the bridge can drive it, and register the `photocraft` MCP server with Claude Code (user scope). `status`: show what's running and registered. `stop`: close the control PhotoCraft gracefully, leaving the registration in place (`-Disconnect` also unregisters). |
-| `photocraft-remove-bystander` | Remove a stranger or bystander from a photo, including a LightCraft `-Edit.psd` copy: select the person minus the subject, clone the background over them row by row, heal leftovers and seams, save in place and have LightCraft reload it. |
+| `photocraft:mcp` | `start`: launch PhotoCraft with its control port, token file and automation folders, prove the bridge can drive it, and register the `photocraft` MCP server with Claude Code (user scope). `status`: show what's running and registered. `stop`: close the control PhotoCraft gracefully, leaving the registration in place (`-Disconnect` also unregisters). |
+| `photocraft:remove-bystander` | Remove a stranger or bystander from a photo, including a LightCraft `-Edit.psd` copy: select the person minus the subject, clone the background over them row by row, heal leftovers and seams, save in place and have LightCraft reload it. |
 
 ## Install
 
@@ -23,7 +23,7 @@ Or add the marketplace first, then install from it:
 /plugin install photocraft@photocraft-skills
 ```
 
-Then, in Claude Code, run `/photocraft:photocraft-mcp start` (plugin skills are namespaced), or just ask
+Then, in Claude Code, run `/photocraft:mcp start` (plugin skills are namespaced), or just ask
 Claude to start PhotoCraft. Set the token file first (see Configuration).
 
 ## Requirements
@@ -63,7 +63,7 @@ config and no log. Never commit the token file (`.gitignore` covers `token.txt` 
 
 **Registration:** `start` registers `photocraft` at user scope, so every Claude Code session has the
 `mcp__photocraft__*` tools, and the registration stays in place when PhotoCraft is closed. With the app
-closed, a tool call fails with "cannot connect to 127.0.0.1:7981"; run `/photocraft-mcp start` in the
+closed, a tool call fails with "cannot connect to 127.0.0.1:7981"; run `/photocraft:mcp start` in the
 same session and the existing tools work again, with no new session needed. The token file must exist when a
 session starts, because the bridge refuses to start without it. PhotoCraft creates it on its first
 `start`. `start -Scope local` registers only for the current folder; `stop -Disconnect` unregisters.
@@ -87,8 +87,8 @@ session starts, because the bridge refuses to start without it. PhotoCraft creat
 ```
 .claude-plugin/plugin.json        plugin manifest
 .claude-plugin/marketplace.json   lets this repo be added as a marketplace
-skills/photocraft-mcp/SKILL.md
-skills/photocraft-remove-bystander/SKILL.md
+skills/mcp/SKILL.md
+skills/remove-bystander/SKILL.md
 scripts/
   find_photocraft.py    install folder detection (Windows, macOS, Linux) and config.env reading
   photocraft-mcp.py     start / status / stop

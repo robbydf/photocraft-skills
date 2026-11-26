@@ -1,13 +1,12 @@
 ---
-name: photocraft-mcp
-description: Use when the user asks to start/launch or stop/shut down PhotoCraft (ArtCraft's pixel editor GUI, not headless) together with the PhotoCraft CLI MCP bridge, to connect or disconnect Claude Code from the PhotoCraft MCP server, to grant PhotoCraft automation read/write folders, to edit a LightCraft photo's -Edit.psd copy in PhotoCraft and save it back, or runs /photocraft-mcp start, stop or status. Also when photocraft-cli mcp --bridge or mcp__photocraft__* tools fail because nothing is listening on 127.0.0.1:7981 or the control token is rejected.
+name: mcp
+description: Use when the user asks to start/launch or stop/shut down PhotoCraft (ArtCraft's pixel editor GUI, not headless) together with the PhotoCraft CLI MCP bridge, to connect or disconnect Claude Code from the PhotoCraft MCP server, to grant PhotoCraft automation read/write folders, to edit a LightCraft photo's -Edit.psd copy in PhotoCraft and save it back, or runs /photocraft:mcp start, stop or status. Also when photocraft-cli mcp --bridge or mcp__photocraft__* tools fail because nothing is listening on 127.0.0.1:7981 or the control token is rejected.
 ---
 
-# photocraft-mcp
+# photocraft:mcp
 
 Three subcommands, all handled by the plugin's script. The argument after the skill name picks one
-(`/photocraft-mcp start`, `/photocraft-mcp stop`, `/photocraft-mcp status`; installed as a plugin,
-`/photocraft:photocraft-mcp start`). With no argument, run `status` and ask which.
+(`/photocraft:mcp start`, `/photocraft:mcp stop`, `/photocraft:mcp status`). With no argument, run `status` and ask which.
 
 The script is in the plugin's `scripts` folder, two levels above this skill's base directory
 (`<base>/../../scripts/photocraft-mcp.py`). Use the real base directory you were given when this
@@ -79,7 +78,7 @@ Success ends with `READY`. A fresh start takes about 30 s.
 **The registration is meant to stay.** Once registered, every Claude Code session has the
 `mcp__photocraft__*` tools, whether or not PhotoCraft is running: the bridge starts without the app and
 reconnects on each call. With PhotoCraft closed, a call returns an error like `cannot connect to
-127.0.0.1:7981 … start the app`. The fix is `/photocraft-mcp start` in the same session, not a new
+127.0.0.1:7981 … start the app`. The fix is `/photocraft:mcp start` in the same session, not a new
 session. Only a session that started before the first registration lacks the tools; there, run `/mcp`
 or start a new session, or drive the bridge from Bash by piping JSON-RPC lines into
 `photocraft-cli mcp --bridge 127.0.0.1:7981 --control-token-file <file>`.
