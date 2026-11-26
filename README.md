@@ -13,15 +13,12 @@ photos, and PhotoCraft does the pixel work LightCraft can't.
 ## Install
 
 ```
-/plugin install photocraft --marketplace robbydf/photocraft-skills
+/plugin marketplace add robbydf/claude-plugins
+/plugin install photocraft@robbydf-plugins
 ```
 
-Or add the marketplace first, then install from it:
-
-```
-/plugin marketplace add robbydf/photocraft-skills
-/plugin install photocraft@photocraft-skills
-```
+`robbydf/claude-plugins` is the one marketplace for all of my plugins. This repo's own marketplace
+(`/plugin marketplace add robbydf/photocraft-skills`) still works too.
 
 Then, in Claude Code, run `/photocraft:mcp start` (plugin skills are namespaced), or just ask
 Claude to start PhotoCraft. Set the token file first (see Configuration).
